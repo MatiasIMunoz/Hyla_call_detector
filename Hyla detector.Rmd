@@ -1,0 +1,286 @@
+---
+title: "Hyla call detection OSU"
+output: html_document
+date: "`r Sys.Date()`"
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Automatic call detection using R {.tabset .tabset-pills}
+
+### 1) The basics
+
+Before jumping to detecting calls, it's important to understand a few things about amplitude envelopes... For this we will work with a sample of a *Hyla chrysoscelis* call.
+
+First, load the [seewave](https://cran.r-project.org/web/packages/seewave/index.html) and [tuneR](https://cran.r-project.org/web/packages/tuneR/index.html) libraries (make sure you have installed them first with the *install.packages()* function):
+
+```{r warning = FALSE, message = FALSE}
+library(seewave)
+library(tuneR)
+library(scales) #just for the alpha() function to make colors transparent
+library(shiny)
+
+# Colorblind friendly colors
+blue_col <- "#004488"
+red_col <- "#BB5566"
+yellow_col <- "#DDAA33"
+
+```
+
+
+There should be seven audio (wav) files in the working directory. Lets upload the sample call (file: "Hyla_test.wav"):
+
+```{r}
+setwd("/Users/matiasvumac/Desktop/Rmarkdown Hyla detector") #define yourself
+path_to_wav <- paste(getwd(), "/","Hyla_test.wav", sep = "")
+wav <- readWave(path_to_wav) #requires package 'tuneR'.
+wav
+
+list.files(path = getwd(), pattern = "\\.wav$") #Check the presence of other WAVs in the wd.
+```
+
+Plot the oscillogram using the *oscillo()* function from the library "seewave":
+
+```{r echo=TRUE, fig.align='center'}
+oscillo(wav)
+```
+
+We can compute the **amplitude envelope** of the oscillogram in R using the function *env()*. Let's see:
+
+```{r, fig.align='center'}
+env(wav, 
+    envt = "abs", # type of envelope
+    colwave = red_col) # color of envelope
+```
+
+We can overlay the oscillogram to the envelope:
+
+```{r, fig.align='center'}
+
+oscillo(wav, 
+        colwave = alpha("black", 0.3))
+par(new = TRUE)
+env(wav, 
+    envt = "abs",
+    colwave = red_col)
+
+```
+
+We can have a closer look at the relationship between oscillogram (black) and amplitude envelope (red) by zooming into a 0.05 seconds section of the call:
+
+```{r, fig.align='center'}
+
+oscillo(wav, 
+        colwave = alpha("black", 0.3),
+        from = 0.61, 
+        to = 0.66) # zoom in the oscillogram to [0.61, 0.66] seconds
+
+par(new = TRUE)
+env(wav, 
+    envt = "abs",
+    colwave = red_col,
+    from = 0.61,
+    to = 0.66)
+
+```
+
+There are parameters we can manipulate to change how the amplitude envelope is computed - the window size and overlap:
+
+```{r, fig.align='center', fig.dim=c(10, 4)}
+wl <- 256  # in samples
+ovlp <- 99 # in percent
+
+par(mfrow = c(1, 2), mar = c(4.1, 4.1, 0.28, 0.28)) # Just to create a figure with 1 row and 2 columns
+oscillo(wav,
+        colwave = alpha("black", 0.3))
+
+par(new = TRUE)
+env(wav, 
+    envt = "abs", 
+    colwave = red_col,
+    msmooth = c(wl, ovlp))
+
+#Zoom in
+oscillo(wav,
+        colwave = alpha("black", 0.3),
+        from = 0.61,
+        to = 0.66)
+par(new = TRUE)
+env(wav,
+    envt = "abs",
+    colwave = red_col,
+    msmooth = c(wl, ovlp),
+    from = 0.61, 
+    to = 0.66) # 256 samples window length
+
+```
+
+Let's try different window lenghts:
+
+```{r, fig.align='center'}
+oscillo(wav,
+        colwave = alpha("black", 0.3),
+        from = 0.61,
+        to = 0.66)
+
+par(new = TRUE)
+env(wav,
+    envt = "abs",
+    colwave = red_col, 
+    msmooth = c(wl, ovlp),
+    from = 0.61,
+    to = 0.66) # 256 samples window length
+
+par(new = TRUE)
+env(wav,
+    envt = "abs",
+    colwave = blue_col, 
+    msmooth = c(wl/6, ovlp),
+    from = 0.61, 
+    to = 0.66) # 43 samples window length
+
+par(new = TRUE)
+env(wav, 
+    envt = "abs",
+    colwave = yellow_col,
+    msmooth = c(wl*2, ovlp),
+    from = 0.61,
+    to = 0.66) # 512 samples window 
+```
+
+So... for detecting pulses small window lengths works better, and for detecting calls large window lenghts are preferred
+
+```{r, fig.align='center'}
+
+oscillo(wav, 
+        colwave = alpha("black", 0.3))
+
+par(new = TRUE)
+env(wav, 
+    envt = "abs", 
+    colwave = blue_col,
+    msmooth = c(wl/6, ovlp)) # 43 samples window length
+
+par(new = TRUE)
+env(wav,
+    envt = "abs", 
+    colwave = "darkorange",
+    msmooth = c(wl*3, ovlp)) # 768 samples window length
+```
+
+A shiny app for testing different combinations of windows lengths and overlaps.
+
+```{r echo=FALSE}
+inputPanel(
+  selectInput("wl", label = "Number of samples in window:",
+              choices = c(4, 8, 16, 32, 64, 128, 256, 512, 1024, 2046), selected = 512),
+  
+  sliderInput("ovlp", label = "Overlap between windows:",
+              min = 0, max = 0.9, value = 0.5, step = 0.1),
+  
+  radioButtons("envt_type", label = "Choose a type of envelope:",
+               choices = c("abs", "hil"), selected = "abs")
+)
+
+renderPlot({
+  par(mfrow = c(1, 2), mar = c(4.1, 4.1, 0.28, 0.28)) # Just to create a figure with 1 row 
+  
+  #Full oscillogram
+  oscillo(wave = wav, colwave = "grey50")
+  par(new = TRUE)
+  env(wav, envt = "abs", colwave = red_col, msmooth = c(as.numeric(input$wl), as.numeric(input$ovlp)))
+  
+  #Zoom in 0.05s
+  oscillo(wave = wav, from = 0.61, to = 0.66, colwave = "grey50")
+  par(new = TRUE)
+  env(wav, from = 0.61, to = 0.66, colwave = red_col, envt = as.character(input$envt_type), msmooth = c(as.numeric(input$wl),   as.numeric(input$ovlp)))
+  
+  
+})
+```
+
+### 2) Detecting calls with *timer()*
+
+Now that we know the basics about amplitude envelopes, we can use them to detect calls automatically. The 'timer()' function in the 'seewave' package computes the amplitude envelope of a waveform, and then detects calls using an **user-defined amplitude threshold**. We need to also define the:
+
+1. windows length (in samples)
+2. overlap (as a percentage)
+3. type of envelope (abs or hil)
+4. amplitude threshold (as a percentage)
+5. power exponential (numeric)
+6. minimum duration of detection (in seconds)
+
+
+Let's try to detect the calls in the sample call.
+
+```{r, fig.align='center', fig.dim=c(10, 4)}
+wl_detect <- 32  # samples
+ovlp_detect <- 90 # percentage
+thrs_detect <- 5  # percentage
+pwr_detect <- 2 # exponential applied to oscillogram
+dmin_detect <- 0.004 # minimum duration for detections
+
+detection <- timer(wave = wav,
+                   threshold = 5,
+                   msmooth = c(wl_detect, ovlp_detect),
+                   power = pwr_detect,
+                   dmin = dmin_detect,
+                   plot = TRUE)
+```
+
+Lets see what the output looks like:
+```{r}
+detection
+```
+```{r}
+library(knitr)
+  
+# Function to create Raven readable file
+  Raven.form <- function(dat.fram)
+    {
+    dat.fram[ , c("Selection", "View", "Channel", "Low Freq (Hz)", "High Freq (Hz)")] <- c( rep(1: nrow(dat.fram)), rep("Spectrogram 1", nrow(dat.fram)), rep(1, nrow(dat.fram)), rep(0, nrow(dat.fram)), rep(22050, nrow(dat.fram)))
+    
+    dat.fram <- dat.fram[, c("Selection", "View", "Channel", "Begin Time (s)", "End Time (s)", "Low Freq (Hz)", "High Freq (Hz)")]
+    
+    dat.fram
+    }
+  
+  #Export selections in Raven format
+  df0 <- as.data.frame(cbind("Begin Time (s)" = detection$s.start,
+                             "End Time (s)" = detection$s.end))
+  df.raven <- Raven.form(df0)
+
+  kable(df.raven)
+
+```
+
+We can export the selections made with *timer()* as a .txt file that can be read in Raven Pro (or Lite).
+```{r, echo = TRUE}
+
+   write.table(df.raven, file = file.path(getwd(), "Hyla_test.Table.1.selection.txt"),  quote = F, col.names = T, row.names = F, sep = "\t")
+
+```
+
+
+```{r}
+#library(warbleR)
+#library(Rraven)
+
+#sound.files <- "Hyla_test.wav"
+#selec <- seq(1:length(detection$s.start))
+#start <- detection$s.start
+#end <- detection$s.end
+
+#df <- cbind.data.frame(sound.files, selec, start, end)
+
+#df_selec_table <- selection_table(df, path = getwd())
+
+#exp_raven(df_selec_table, file.name = "Hyla_test_Raven", khz.to.hz = TRUE, path = getwd())
+
+```
+
+
+
